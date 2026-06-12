@@ -3,6 +3,8 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const testing = std.testing;
+
 const native_endian = builtin.cpu.arch.endian();
 
 const lut = blk: {
@@ -29,9 +31,6 @@ pub const UltraCDC = struct {
 
         const min_size = options.min_size;
         const max_size = options.max_size;
-        var normal_size = options.normal_size;
-
-        var low_entropy_count: usize = 0;
 
         // Need at least min_size + 8 bytes to initialize the 8-byte hamming distance window
         if (n < min_size + 8) {
@@ -39,15 +38,14 @@ pub const UltraCDC = struct {
         }
 
         const n_capped = @min(n, max_size);
-        if (n_capped < normal_size) {
-            normal_size = n_capped;
+        const normal_size = @min(options.normal_size, n_capped);
+
+        var dist: u8 = 0;
+        for (data[min_size..][0..8]) |byte| {
+            dist += lut[byte];
         }
 
-        // Initialize hamming distance on first 8-byte window
-        var dist: u8 = 0;
-        for (0..8) |j| {
-            dist += lut[data[min_size + j]];
-        }
+        var low_entropy_count: usize = 0;
 
         var out_win = std.mem.readInt(u64, data[min_size..][0..8], native_endian);
         var i = min_size + 8;
@@ -76,30 +74,30 @@ pub const UltraCDC = struct {
 
 test "default options" {
     const opts = ChunkerOptions{};
-    try std.testing.expectEqual(@as(usize, 8 * 1024), opts.min_size);
-    try std.testing.expectEqual(@as(usize, 64 * 1024), opts.normal_size);
-    try std.testing.expectEqual(@as(usize, 128 * 1024), opts.max_size);
+    try testing.expectEqual(8 * 1024, opts.min_size);
+    try testing.expectEqual(64 * 1024, opts.normal_size);
+    try testing.expectEqual(128 * 1024, opts.max_size);
 }
 
 test "algorithm - data smaller than min_size" {
     const opts = ChunkerOptions{};
     const data: [1024]u8 = @splat(0x00);
     const cutpoint = UltraCDC.find(opts, &data, data.len);
-    try std.testing.expectEqual(data.len, cutpoint);
+    try testing.expectEqual(data.len, cutpoint);
 }
 
 test "algorithm - data at min_size" {
     const opts = ChunkerOptions{};
     const data: [8 * 1024]u8 = @splat(0x00);
     const cutpoint = UltraCDC.find(opts, &data, data.len);
-    try std.testing.expectEqual(data.len, cutpoint);
+    try testing.expectEqual(data.len, cutpoint);
 }
 
 test "algorithm - data between min_size and min_size + 8" {
     const opts = ChunkerOptions{ .min_size = 1024 };
     const data: [1030]u8 = @splat(0x00);
     const cutpoint = UltraCDC.find(opts, &data, data.len);
-    try std.testing.expectEqual(data.len, cutpoint);
+    try testing.expectEqual(data.len, cutpoint);
 }
 
 test "algorithm - low entropy detection" {
@@ -118,7 +116,7 @@ test "algorithm - low entropy detection" {
 
     // Should cut due to low entropy after 64 identical windows
     // cutpoint should be min_size + 8 + (64 * 8) = 1024 + 8 + 512 = 1544
-    try std.testing.expectEqual(@as(usize, 1544), cutpoint);
+    try testing.expectEqual(1544, cutpoint);
 }
 
 test "algorithm - max_size cap" {
@@ -138,22 +136,22 @@ test "algorithm - max_size cap" {
     const cutpoint = UltraCDC.find(opts, &data, data.len);
 
     // Should be capped at max_size
-    try std.testing.expectEqual(opts.max_size, cutpoint);
+    try testing.expectEqual(opts.max_size, cutpoint);
 }
 
 test "hamming distance lookup table verification" {
     // Verify a few entries in the lookup table
     // 0xAA XOR 0xAA = 0x00 (0 bits set) -> distance = 0
-    try std.testing.expectEqual(0, lut[0xAA]);
+    try testing.expectEqual(0, lut[0xAA]);
 
     // 0xAA XOR 0x55 = 0xFF (8 bits set) -> distance = 8
-    try std.testing.expectEqual(8, lut[0x55]);
+    try testing.expectEqual(8, lut[0x55]);
 
     // 0xAA XOR 0x00 = 0xAA (4 bits set) -> distance = 4
-    try std.testing.expectEqual(4, lut[0x00]);
+    try testing.expectEqual(4, lut[0x00]);
 
     // 0xAA XOR 0xFF = 0x55 (4 bits set) -> distance = 4
-    try std.testing.expectEqual(4, lut[0xFF]);
+    try testing.expectEqual(4, lut[0xFF]);
 }
 
 test "algorithm - random data produces reasonable chunks" {
@@ -169,6 +167,6 @@ test "algorithm - random data produces reasonable chunks" {
     const cutpoint = UltraCDC.find(opts, &data, data.len);
 
     // Cutpoint should be within valid range
-    try std.testing.expect(cutpoint >= opts.min_size);
-    try std.testing.expect(cutpoint <= data.len);
+    try testing.expect(cutpoint >= opts.min_size);
+    try testing.expect(cutpoint <= data.len);
 }

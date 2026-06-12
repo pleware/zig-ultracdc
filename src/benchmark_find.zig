@@ -1,14 +1,25 @@
 const std = @import("std");
 const ultracdc = @import("ultracdc");
+const Io = std.Io;
+
+fn chunkAll(opts: ultracdc.ChunkerOptions, data: []const u8) usize {
+    var chunks: usize = 0;
+    var offset: usize = 0;
+    while (offset < data.len) {
+        offset += ultracdc.UltraCDC.find(opts, data[offset..], data.len - offset);
+        chunks += 1;
+    }
+    return chunks;
+}
 
 pub fn main(init: std.process.Init) !void {
     const allocator = init.gpa;
     const io = init.io;
 
-    var stderr_writer = std.Io.File.stderr().writer(io, &.{});
+    var stderr_writer = Io.File.stderr().writer(io, &.{});
     const stderr = &stderr_writer.interface;
 
-    const opts = ultracdc.ChunkerOptions{
+    const opts: ultracdc.ChunkerOptions = .{
         .min_size = 8 * 1024,
         .normal_size = 64 * 1024,
         .max_size = 128 * 1024,
@@ -19,8 +30,7 @@ pub fn main(init: std.process.Init) !void {
     defer allocator.free(data);
 
     var prng = std.Random.DefaultPrng.init(12345);
-    const random = prng.random();
-    random.bytes(data);
+    prng.random().bytes(data);
 
     try stderr.print("Benchmarking UltraCDC.find() on {d} MB of data\n", .{data_size / (1024 * 1024)});
     try stderr.print("Options: min={d} KB, normal={d} KB, max={d} KB\n\n", .{
@@ -29,33 +39,18 @@ pub fn main(init: std.process.Init) !void {
         opts.max_size / 1024,
     });
 
-    var offset: usize = 0;
-    var chunks: usize = 0;
-    while (offset < data.len) {
-        const remaining = data.len - offset;
-        const cutpoint = ultracdc.UltraCDC.find(opts, data[offset..], remaining);
-        offset += cutpoint;
-        chunks += 1;
-    }
+    std.mem.doNotOptimizeAway(chunkAll(opts, data));
 
     const iterations = 10;
     var total_ns: u64 = 0;
 
-    var iter: usize = 0;
-    while (iter < iterations) : (iter += 1) {
-        offset = 0;
-        chunks = 0;
+    for (0..iterations) |iter| {
+        std.mem.doNotOptimizeAway(data.ptr);
+        const start = Io.Clock.awake.now(io);
+        const chunks = chunkAll(opts, data);
+        std.mem.doNotOptimizeAway(chunks);
+        const end = Io.Clock.awake.now(io);
 
-        const start = std.Io.Clock.awake.now(io);
-
-        while (offset < data.len) {
-            const remaining = data.len - offset;
-            const cutpoint = ultracdc.UltraCDC.find(opts, data[offset..], remaining);
-            offset += cutpoint;
-            chunks += 1;
-        }
-
-        const end = std.Io.Clock.awake.now(io);
         const elapsed: u64 = @intCast(start.durationTo(end).nanoseconds);
         total_ns += elapsed;
 
