@@ -26,7 +26,7 @@ pub fn build(b: *std.Build) void {
     const run_cmd = b.addRunArtifact(exe);
     run_step.dependOn(&run_cmd.step);
     run_cmd.step.dependOn(b.getInstallStep());
-    run_cmd.addPassthruArgs();
+    run_cmd.addArgs(b.args orelse &.{});
 
     const mod_tests = b.addTest(.{
         .root_module = mod,
